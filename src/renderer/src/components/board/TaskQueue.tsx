@@ -23,14 +23,12 @@ function SectionHeader({
   total,
   hiddenCount,
   collapsed,
-  onToggle,
   onAdd
 }: {
   title: string
   total: number
   hiddenCount: number
   collapsed: boolean
-  onToggle: () => void
   onAdd: () => void
 }) {
   const Icon = collapsed ? ChevronRightIcon : ChevronDownIcon
@@ -39,7 +37,6 @@ function SectionHeader({
       <CollapsibleTrigger asChild>
         <button
           type="button"
-          onClick={onToggle}
           className="flex items-center gap-1.5 text-left flex-1 min-w-0"
         >
           <Icon className="w-3.5 h-3.5 text-text-tertiary" />
@@ -270,7 +267,6 @@ export function TaskQueue() {
           total={totalCount}
           hiddenCount={hiddenCount}
           collapsed={collapsed}
-          onToggle={onToggle}
           onAdd={() => handleNewTask(category)}
         />
         <CollapsibleContent className="overflow-hidden data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0">

@@ -56,14 +56,15 @@ export function TaskForm({
   useEffect(() => {
     if (!isOpen) return
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        onClose()
-      }
+      if (e.key !== 'Escape') return
+      // Let the delete confirmation dialog handle its own Escape first.
+      if (confirmDelete) return
+      e.preventDefault()
+      onClose()
     }
     window.addEventListener('keydown', handleEscape)
     return () => window.removeEventListener('keydown', handleEscape)
-  }, [isOpen, onClose])
+  }, [isOpen, onClose, confirmDelete])
 
   const handlePickFolder = useCallback(async () => {
     const folder = await window.electronAPI?.openFolderDialog()

@@ -176,9 +176,14 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     const newDefs = get().tagDefinitions.map((t) =>
       t.name === existing.name ? { ...t, name: trimmed } : t
     )
+    const now = Date.now()
     const newTasks = get().tasks.map((t) => {
       if (!t.tags.includes(existing.name)) return t
-      return { ...t, tags: t.tags.map((n) => (n === existing.name ? trimmed : n)) }
+      return {
+        ...t,
+        tags: t.tags.map((n) => (n === existing.name ? trimmed : n)),
+        updatedAt: now
+      }
     })
     const newFilter = get().filterTags.map((n) => (n === existing.name ? trimmed : n))
     set({ tagDefinitions: newDefs, tasks: newTasks, filterTags: newFilter })
@@ -199,9 +204,14 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     const existing = findTag(get().tagDefinitions, name)
     if (!existing) return
     const newDefs = get().tagDefinitions.filter((t) => t.name !== existing.name)
+    const now = Date.now()
     const newTasks = get().tasks.map((t) => {
       if (!t.tags.includes(existing.name)) return t
-      return { ...t, tags: t.tags.filter((n) => n !== existing.name) }
+      return {
+        ...t,
+        tags: t.tags.filter((n) => n !== existing.name),
+        updatedAt: now
+      }
     })
     const newFilter = get().filterTags.filter((n) => n !== existing.name)
     set({ tagDefinitions: newDefs, tasks: newTasks, filterTags: newFilter })
