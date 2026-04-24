@@ -150,12 +150,12 @@ export const useBoardStore = create<BoardState>((set, get) => ({
   },
 
   createTag: (name) => {
-    const trimmed = name.trim()
-    if (!trimmed) return null
-    const existing = findTag(get().tagDefinitions, trimmed)
+    const normalized = name.trim().toLowerCase()
+    if (!normalized) return null
+    const existing = findTag(get().tagDefinitions, normalized)
     if (existing) return existing
     const def: TagDefinition = {
-      name: trimmed,
+      name: normalized,
       color: nextTagColor(get().tagDefinitions)
     }
     const newDefs = [...get().tagDefinitions, def]
@@ -165,27 +165,46 @@ export const useBoardStore = create<BoardState>((set, get) => ({
   },
 
   renameTag: (oldName, newName) => {
-    const trimmed = newName.trim()
-    if (!trimmed) return
+    const normalized = newName.trim().toLowerCase()
+    if (!normalized) return
     const existing = findTag(get().tagDefinitions, oldName)
     if (!existing) return
-    // Block rename if another tag already has the new name (case-insensitive)
-    const collision = findTag(get().tagDefinitions, trimmed)
-    if (collision && collision.name !== existing.name) return
+    if (normalized === existing.name) return // no-op (case-only change already normalized)
 
-    const newDefs = get().tagDefinitions.map((t) =>
-      t.name === existing.name ? { ...t, name: trimmed } : t
-    )
+    const collision = findTag(get().tagDefinitions, normalized)
     const now = Date.now()
+
+    if (collision && collision.name !== existing.name) {
+      // Merge: rewrite task refs from existing.name to collision.name,
+      // dedup within each task, drop the source definition.
+      const targetName = collision.name
+      const newDefs = get().tagDefinitions.filter((t) => t.name !== existing.name)
+      const newTasks = get().tasks.map((t) => {
+        if (!t.tags.includes(existing.name)) return t
+        const replaced = t.tags.map((n) => (n === existing.name ? targetName : n))
+        return { ...t, tags: Array.from(new Set(replaced)), updatedAt: now }
+      })
+      const newFilter = Array.from(
+        new Set(get().filterTags.map((n) => (n === existing.name ? targetName : n)))
+      )
+      set({ tagDefinitions: newDefs, tasks: newTasks, filterTags: newFilter })
+      debouncedSave(newTasks, newDefs)
+      return
+    }
+
+    // No collision — straight rename.
+    const newDefs = get().tagDefinitions.map((t) =>
+      t.name === existing.name ? { ...t, name: normalized } : t
+    )
     const newTasks = get().tasks.map((t) => {
       if (!t.tags.includes(existing.name)) return t
       return {
         ...t,
-        tags: t.tags.map((n) => (n === existing.name ? trimmed : n)),
+        tags: t.tags.map((n) => (n === existing.name ? normalized : n)),
         updatedAt: now
       }
     })
-    const newFilter = get().filterTags.map((n) => (n === existing.name ? trimmed : n))
+    const newFilter = get().filterTags.map((n) => (n === existing.name ? normalized : n))
     set({ tagDefinitions: newDefs, tasks: newTasks, filterTags: newFilter })
     debouncedSave(newTasks, newDefs)
   },

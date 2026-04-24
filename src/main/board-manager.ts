@@ -38,13 +38,22 @@ class BoardManager {
       const raw = fs.readFileSync(this.filePath, 'utf-8')
       const parsed = JSON.parse(raw) as Record<string, unknown>
 
+      // Tag names are stored lowercase (case-insensitive identity). Migrate any
+      // legacy mixed-case names by lowercasing them and deduping; the first
+      // occurrence of each lowercased name keeps its color.
       const rawTags = Array.isArray(parsed.tagDefinitions)
         ? (parsed.tagDefinitions as Array<Record<string, unknown>>)
         : []
-      const tagDefinitions: TagDefinition[] = rawTags
-        .filter((t) => typeof t.name === 'string' && typeof t.color === 'string')
-        .map((t) => ({ name: t.name as string, color: t.color as string }))
-      const validTagNames = new Set(tagDefinitions.map((t) => t.name))
+      const tagDefinitions: TagDefinition[] = []
+      const seenTagNames = new Set<string>()
+      for (const t of rawTags) {
+        if (typeof t.name !== 'string' || typeof t.color !== 'string') continue
+        const normalized = t.name.trim().toLowerCase()
+        if (!normalized || seenTagNames.has(normalized)) continue
+        seenTagNames.add(normalized)
+        tagDefinitions.push({ name: normalized, color: t.color })
+      }
+      const validTagNames = seenTagNames
 
       // Migrate old kanban tasks: only keep unrun tasks (status 'todo' or no status)
       // and strip removed fields. Default category='ready' for legacy tasks
@@ -65,9 +74,14 @@ class BoardManager {
                 ? 'ready'
                 : 'ready'
           const rawTaskTags = Array.isArray(t.tags) ? (t.tags as unknown[]) : []
-          const tags = rawTaskTags
-            .filter((name): name is string => typeof name === 'string')
-            .filter((name) => validTagNames.has(name))
+          const tags = Array.from(
+            new Set(
+              rawTaskTags
+                .filter((name): name is string => typeof name === 'string')
+                .map((name) => name.trim().toLowerCase())
+                .filter((name) => validTagNames.has(name))
+            )
+          )
           return {
             id: t.id as string,
             title: (t.title as string) ?? '',
