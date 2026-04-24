@@ -105,6 +105,8 @@ export interface FileReadResult {
   binary: boolean
 }
 
+export type BoardTaskCategory = 'backlog' | 'ready'
+
 export interface BoardTask {
   id: string
   title: string
@@ -113,10 +115,18 @@ export interface BoardTask {
   dangerousMode: boolean
   createdAt: number
   updatedAt: number
+  category: BoardTaskCategory
+  tags: string[]
+}
+
+export interface TagDefinition {
+  name: string
+  color: string
 }
 
 export interface BoardData {
   tasks: BoardTask[]
+  tagDefinitions: TagDefinition[]
 }
 
 export interface JournalEntryData {

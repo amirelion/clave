@@ -47,6 +47,17 @@ export function TaskQueueSection({ collapsed }: { collapsed: boolean }) {
   const tasks = useBoardStore((s) => s.tasks)
   const [expanded, setExpanded] = useState(false)
 
+  const readyTasks = useMemo(() => tasks.filter((t) => t.category === 'ready'), [tasks])
+  const backlogTasks = useMemo(() => tasks.filter((t) => t.category !== 'ready'), [tasks])
+
+  const countLabel = useMemo(() => {
+    if (readyTasks.length === 0 && backlogTasks.length === 0) return null
+    if (readyTasks.length > 0 && backlogTasks.length > 0) {
+      return `${readyTasks.length} ready · ${backlogTasks.length} backlog`
+    }
+    return `${tasks.length}`
+  }, [tasks.length, readyTasks.length, backlogTasks.length])
+
   return (
     <div
       className="grid transition-[grid-template-rows,opacity,transform] duration-250 ease-out flex-shrink-0"
@@ -66,8 +77,11 @@ export function TaskQueueSection({ collapsed }: { collapsed: boolean }) {
           >
             <QueueListIcon className="flex-shrink-0 w-4 h-4 text-text-tertiary" />
             <span className="truncate">Queue</span>
-            {tasks.length > 0 && (
+            {countLabel && (
               <span className="ml-auto flex items-center gap-1.5">
+                <span className="text-[10px] text-text-tertiary whitespace-nowrap">
+                  {countLabel}
+                </span>
                 <span
                   role="button"
                   onClick={(e) => {
@@ -87,13 +101,17 @@ export function TaskQueueSection({ collapsed }: { collapsed: boolean }) {
             )}
           </button>
 
-          {/* Expanded sub-items: task list with vertical connecting line */}
+          {/* Expanded sub-items: task list grouped by category, with vertical connecting line */}
           {expanded && tasks.length > 0 && (
             <div className="relative ml-[18px] mt-0.5">
-              {/* Vertical connecting line */}
               <div className="absolute left-0 top-0 bottom-0 w-px bg-border-subtle" />
 
-              {tasks.map((task) => {
+              {readyTasks.length > 0 && (
+                <div className="pl-4 pt-1 pb-0.5 text-[9px] font-semibold uppercase tracking-wider text-text-tertiary opacity-60">
+                  Ready
+                </div>
+              )}
+              {readyTasks.map((task) => {
                 const label = task.title || task.prompt
                 return (
                   <button
@@ -101,7 +119,30 @@ export function TaskQueueSection({ collapsed }: { collapsed: boolean }) {
                     onClick={() => setActiveView('board')}
                     className="group relative w-full flex items-center gap-2 pl-4 pr-2 py-1 text-left rounded-r-md hover:bg-surface-100 transition-colors"
                   >
-                    {/* Horizontal branch tick */}
+                    <div className="absolute left-0 top-1/2 w-2.5 h-px bg-border-subtle" />
+                    <span className="text-[12px] text-text-secondary truncate">{label}</span>
+                    {task.dangerousMode && (
+                      <span className="flex-shrink-0 text-[9px] text-red-400 font-medium">
+                        skip
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+
+              {backlogTasks.length > 0 && (
+                <div className="pl-4 pt-1.5 pb-0.5 text-[9px] font-semibold uppercase tracking-wider text-text-tertiary opacity-60">
+                  Backlog
+                </div>
+              )}
+              {backlogTasks.map((task) => {
+                const label = task.title || task.prompt
+                return (
+                  <button
+                    key={task.id}
+                    onClick={() => setActiveView('board')}
+                    className="group relative w-full flex items-center gap-2 pl-4 pr-2 py-1 text-left rounded-r-md hover:bg-surface-100 transition-colors"
+                  >
                     <div className="absolute left-0 top-1/2 w-2.5 h-px bg-border-subtle" />
                     <span className="text-[12px] text-text-secondary truncate">{label}</span>
                     {task.dangerousMode && (

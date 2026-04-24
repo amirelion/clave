@@ -1,58 +1,122 @@
-import { useState, useCallback } from 'react'
-import { PlusIcon, FolderIcon } from '@heroicons/react/24/outline'
+import { useState, useCallback, useMemo } from 'react'
+import { PlusIcon, ChevronDownIcon, ChevronRightIcon } from '@heroicons/react/24/outline'
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '../ui/collapsible'
 import { useBoardStore } from '../../store/board-store'
 import { useSessionStore } from '../../store/session-store'
 import { useBoardPersistence } from '../../hooks/use-board-persistence'
 import { TaskForm } from './TaskForm'
+import { TagFilterBar } from './TagFilterBar'
+import { TaskRow, TASK_ROW_DRAG_MIME } from './TaskRow'
 import { ContextMenu } from '../ui/ContextMenu'
+import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { cn } from '../../lib/utils'
-import type { BoardTask } from '../../../../preload/index.d'
+import type { BoardTask, BoardTaskCategory } from '../../../../preload/index.d'
 
-function shortenCwd(cwd: string): string {
-  const parts = cwd.split('/')
-  if (parts.length <= 3) return cwd
-  return '~/' + parts.slice(-2).join('/')
+interface ContextMenuState {
+  x: number
+  y: number
+  items: { label: string; onClick: () => void; danger?: boolean }[]
 }
 
-function formatDate(ts: number): string {
-  const d = new Date(ts)
-  const now = new Date()
-  const diffMs = now.getTime() - d.getTime()
-  const diffMin = Math.floor(diffMs / 60000)
-  if (diffMin < 1) return 'just now'
-  if (diffMin < 60) return `${diffMin}m ago`
-  const diffHr = Math.floor(diffMin / 60)
-  if (diffHr < 24) return `${diffHr}h ago`
-  const diffDay = Math.floor(diffHr / 24)
-  if (diffDay < 7) return `${diffDay}d ago`
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+function SectionHeader({
+  title,
+  total,
+  hiddenCount,
+  collapsed,
+  onToggle,
+  onAdd
+}: {
+  title: string
+  total: number
+  hiddenCount: number
+  collapsed: boolean
+  onToggle: () => void
+  onAdd: () => void
+}) {
+  const Icon = collapsed ? ChevronRightIcon : ChevronDownIcon
+  return (
+    <div className="w-full flex items-center gap-1.5 py-1">
+      <CollapsibleTrigger asChild>
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex items-center gap-1.5 text-left flex-1 min-w-0"
+        >
+          <Icon className="w-3.5 h-3.5 text-text-tertiary" />
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-text-tertiary">
+            {title}
+          </span>
+          <span className="text-[11px] text-text-tertiary opacity-60">{total}</span>
+          {hiddenCount > 0 && (
+            <span className="text-[10px] text-text-tertiary opacity-60 ml-1">
+              ({hiddenCount} hidden by filter)
+            </span>
+          )}
+        </button>
+      </CollapsibleTrigger>
+      <button
+        type="button"
+        onClick={onAdd}
+        className="btn-icon btn-icon-sm"
+        title={`Add task to ${title}`}
+      >
+        <PlusIcon className="w-3.5 h-3.5" />
+      </button>
+    </div>
+  )
 }
 
 export function TaskQueue() {
   const tasks = useBoardStore((s) => s.tasks)
+  const filterTags = useBoardStore((s) => s.filterTags)
   const removeTask = useBoardStore((s) => s.removeTask)
   const deleteTask = useBoardStore((s) => s.deleteTask)
+  const moveTaskCategory = useBoardStore((s) => s.moveTaskCategory)
+  const addTagToTask = useBoardStore((s) => s.addTagToTask)
+  const removeTagFromTask = useBoardStore((s) => s.removeTagFromTask)
+  const createTag = useBoardStore((s) => s.createTag)
+  const tagDefinitions = useBoardStore((s) => s.tagDefinitions)
+  const backlogCollapsed = useBoardStore((s) => s.backlogCollapsed)
+  const readyCollapsed = useBoardStore((s) => s.readyCollapsed)
+  const toggleBacklogCollapsed = useBoardStore((s) => s.toggleBacklogCollapsed)
+  const toggleReadyCollapsed = useBoardStore((s) => s.toggleReadyCollapsed)
 
   const addSession = useSessionStore((s) => s.addSession)
 
   const [formOpen, setFormOpen] = useState(false)
   const [editTask, setEditTask] = useState<BoardTask | null>(null)
-
-  const [contextMenu, setContextMenu] = useState<{
-    x: number
-    y: number
-    items: { label: string; onClick: () => void; danger?: boolean }[]
-  } | null>(null)
+  const [newTaskCategory, setNewTaskCategory] = useState<BoardTaskCategory>('backlog')
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
+  const [dragOverCategory, setDragOverCategory] = useState<BoardTaskCategory | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<BoardTask | null>(null)
 
   useBoardPersistence()
+
+  const { readyTasks, backlogTasks, readyHidden, backlogHidden } = useMemo(() => {
+    const readyAll = tasks.filter((t) => t.category === 'ready')
+    const backlogAll = tasks.filter((t) => t.category !== 'ready')
+    const matchesFilter = (t: BoardTask): boolean => {
+      if (filterTags.length === 0) return true
+      return t.tags.some((tag) => filterTags.includes(tag))
+    }
+    const readyFiltered = readyAll.filter(matchesFilter)
+    const backlogFiltered = backlogAll.filter(matchesFilter)
+    return {
+      readyTasks: readyFiltered,
+      backlogTasks: backlogFiltered,
+      readyHidden: readyAll.length - readyFiltered.length,
+      backlogHidden: backlogAll.length - backlogFiltered.length
+    }
+  }, [tasks, filterTags])
 
   const handleEdit = useCallback((task: BoardTask) => {
     setEditTask(task)
     setFormOpen(true)
   }, [])
 
-  const handleNewTask = useCallback(() => {
+  const handleNewTask = useCallback((category: BoardTaskCategory) => {
     setEditTask(null)
+    setNewTaskCategory(category)
     setFormOpen(true)
   }, [])
 
@@ -115,98 +179,178 @@ export function TaskQueue() {
     [addSession, removeTask]
   )
 
+  const buildTagMenuItems = useCallback(
+    (task: BoardTask): ContextMenuState['items'] => {
+      const items: ContextMenuState['items'] = []
+      for (const def of tagDefinitions) {
+        const attached = task.tags.includes(def.name)
+        items.push({
+          label: attached ? `✓  ${def.name}` : `    ${def.name}`,
+          onClick: () =>
+            attached ? removeTagFromTask(task.id, def.name) : addTagToTask(task.id, def.name)
+        })
+      }
+      items.push({
+        label: '＋  New tag…',
+        onClick: () => {
+          const name = window.prompt('New tag name')
+          if (!name) return
+          const def = createTag(name)
+          if (def) addTagToTask(task.id, def.name)
+        }
+      })
+      return items
+    },
+    [tagDefinitions, addTagToTask, removeTagFromTask, createTag]
+  )
+
   const handleContextMenu = useCallback(
     (e: React.MouseEvent, task: BoardTask) => {
       e.preventDefault()
-      setContextMenu({
-        x: e.clientX,
-        y: e.clientY,
-        items: [
-          { label: 'Edit', onClick: () => handleEdit(task) },
-          { label: 'Delete', onClick: () => deleteTask(task.id), danger: true }
-        ]
-      })
+      const targetCategory: BoardTaskCategory = task.category === 'ready' ? 'backlog' : 'ready'
+      const items: ContextMenuState['items'] = [
+        { label: 'Edit', onClick: () => handleEdit(task) },
+        {
+          label: task.category === 'ready' ? 'Move to Backlog' : 'Move to Ready',
+          onClick: () => moveTaskCategory(task.id, targetCategory)
+        },
+        ...buildTagMenuItems(task),
+        { label: 'Delete', onClick: () => setDeleteTarget(task), danger: true }
+      ]
+      setContextMenu({ x: e.clientX, y: e.clientY, items })
     },
-    [handleEdit, deleteTask]
+    [handleEdit, moveTaskCategory, buildTagMenuItems]
   )
+
+  const handleDragOver = useCallback(
+    (e: React.DragEvent<HTMLDivElement>, category: BoardTaskCategory) => {
+      if (!e.dataTransfer.types.includes(TASK_ROW_DRAG_MIME)) return
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'move'
+      if (dragOverCategory !== category) setDragOverCategory(category)
+    },
+    [dragOverCategory]
+  )
+
+  const handleDragLeave = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      if (e.currentTarget.contains(e.relatedTarget as Node)) return
+      setDragOverCategory(null)
+    },
+    []
+  )
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent<HTMLDivElement>, category: BoardTaskCategory) => {
+      const id = e.dataTransfer.getData(TASK_ROW_DRAG_MIME)
+      setDragOverCategory(null)
+      if (!id) return
+      const task = tasks.find((t) => t.id === id)
+      if (!task || task.category === category) return
+      moveTaskCategory(id, category)
+    },
+    [tasks, moveTaskCategory]
+  )
+
+  const renderSection = (
+    category: BoardTaskCategory,
+    title: string,
+    emptyMessage: string,
+    filteredTasks: BoardTask[],
+    totalCount: number,
+    hiddenCount: number,
+    collapsed: boolean,
+    onToggle: () => void
+  ) => {
+    const isDropTarget = dragOverCategory === category
+    return (
+      <Collapsible open={!collapsed} onOpenChange={() => onToggle()}>
+        <SectionHeader
+          title={title}
+          total={totalCount}
+          hiddenCount={hiddenCount}
+          collapsed={collapsed}
+          onToggle={onToggle}
+          onAdd={() => handleNewTask(category)}
+        />
+        <CollapsibleContent className="overflow-hidden data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0">
+          <div
+            onDragOver={(e) => handleDragOver(e, category)}
+            onDragLeave={handleDragLeave}
+            onDrop={(e) => handleDrop(e, category)}
+            className={cn(
+              'rounded-lg transition-colors',
+              isDropTarget ? 'bg-surface-100 ring-1 ring-accent/40' : ''
+            )}
+          >
+            {totalCount === 0 ? (
+              <div className="py-6 text-center text-xs text-text-tertiary">{emptyMessage}</div>
+            ) : filteredTasks.length === 0 ? (
+              <div className="py-6 text-center text-xs text-text-tertiary">
+                No tasks match the current filter.
+              </div>
+            ) : (
+              <div>
+                {filteredTasks.map((task) => (
+                  <TaskRow
+                    key={task.id}
+                    task={task}
+                    onEdit={handleEdit}
+                    onRun={runTask}
+                    onDelete={setDeleteTarget}
+                    onContextMenu={handleContextMenu}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+    )
+  }
 
   return (
     <div className="flex-1 min-w-0 min-h-0 flex flex-col bg-surface-50">
       <div className="flex-1 overflow-auto">
         <div className="max-w-2xl mx-auto px-6 py-8">
-          {/* Title */}
-          <div className="flex items-center justify-between mb-6">
+          <div className="mb-6">
             <h1 className="text-2xl font-semibold text-text-primary">Queue</h1>
-            <button
-              onClick={handleNewTask}
-              className="btn-icon btn-icon-md"
-              title="Add task"
-            >
-              <PlusIcon className="w-4 h-4" />
-            </button>
           </div>
 
-          {/* Task list */}
-          {tasks.length === 0 ? (
-            <div className="flex items-center justify-center h-40 text-sm text-text-tertiary">
-              No tasks queued yet.
-            </div>
-          ) : (
-            <div>
-              {tasks.map((task) => (
-                <button
-                  key={task.id}
-                  type="button"
-                  onClick={() => runTask(task)}
-                  onContextMenu={(e) => handleContextMenu(e, task)}
-                  className="w-full flex items-center gap-4 px-3 py-3 -mx-3 rounded-lg text-left hover:bg-surface-100 transition-colors group"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[13px] font-medium text-text-primary truncate">
-                        {task.title || task.prompt}
-                      </span>
-                      {task.dangerousMode && (
-                        <span className="badge flex-shrink-0 bg-red-500/10 text-red-400">
-                          skip-perms
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-0 text-xs text-text-tertiary mt-0.5">
-                      {task.title && task.prompt && (
-                        <>
-                          <span className="truncate max-w-[65%]">{task.prompt}</span>
-                          <span className="mx-1.5 opacity-40 flex-shrink-0">·</span>
-                        </>
-                      )}
-                      <span className="flex items-center gap-1 flex-shrink-0">
-                        <FolderIcon className="w-3 h-3" />
-                        <span className="truncate max-w-[160px]" title={task.cwd}>
-                          {shortenCwd(task.cwd)}
-                        </span>
-                      </span>
-                      <span className="mx-1.5 opacity-40 flex-shrink-0">·</span>
-                      <span className="flex-shrink-0 whitespace-nowrap">{formatDate(task.createdAt)}</span>
-                    </div>
-                  </div>
-                  <div className={cn(
-                    'flex-shrink-0 h-7 px-3 rounded-lg text-xs font-medium flex items-center gap-1.5',
-                    'bg-green-500/10 text-green-500 group-hover:bg-green-500/20',
-                    'opacity-0 group-hover:opacity-100 transition-opacity'
-                  )}>
-                    <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
-                      <path d="M3 1.5L10 6L3 10.5V1.5Z" fill="currentColor" />
-                    </svg>
-                    Run
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
+          <TagFilterBar />
+
+          <div className="space-y-4">
+            {renderSection(
+              'ready',
+              'Ready',
+              'Nothing ready yet. Drag an idea here when you want to run it soon.',
+              readyTasks,
+              readyTasks.length + readyHidden,
+              readyHidden,
+              readyCollapsed,
+              toggleReadyCollapsed
+            )}
+            {renderSection(
+              'backlog',
+              'Backlog',
+              'No ideas parked yet. Click + to capture one.',
+              backlogTasks,
+              backlogTasks.length + backlogHidden,
+              backlogHidden,
+              backlogCollapsed,
+              toggleBacklogCollapsed
+            )}
+          </div>
         </div>
       </div>
 
-      <TaskForm isOpen={formOpen} onClose={handleCloseForm} editTask={editTask} />
+      <TaskForm
+        isOpen={formOpen}
+        onClose={handleCloseForm}
+        editTask={editTask}
+        onRun={runTask}
+        initialCategory={newTaskCategory}
+      />
 
       {contextMenu && (
         <ContextMenu
@@ -216,6 +360,21 @@ export function TaskQueue() {
           onClose={() => setContextMenu(null)}
         />
       )}
+
+      <ConfirmDialog
+        isOpen={deleteTarget !== null}
+        title="Delete task?"
+        message={
+          deleteTarget
+            ? `"${deleteTarget.title || deleteTarget.prompt.slice(0, 60)}" will be removed from the queue.`
+            : ''
+        }
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (deleteTarget) deleteTask(deleteTarget.id)
+          setDeleteTarget(null)
+        }}
+      />
     </div>
   )
 }

@@ -1,22 +1,37 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { TrashIcon } from '@heroicons/react/24/outline'
 import { useBoardStore } from '../../store/board-store'
+import { TagInput } from './TagInput'
+import { ConfirmDialog } from '../ui/ConfirmDialog'
+import type { BoardTask, BoardTaskCategory } from '../../../../preload/index.d'
 
 interface TaskFormProps {
   isOpen: boolean
   onClose: () => void
-  editTask?: { id: string; title: string; prompt: string; cwd: string; dangerousMode: boolean } | null
+  editTask?: BoardTask | null
+  onRun?: (task: BoardTask) => void
+  initialCategory?: BoardTaskCategory
 }
 
-export function TaskForm({ isOpen, onClose, editTask }: TaskFormProps) {
+export function TaskForm({
+  isOpen,
+  onClose,
+  editTask,
+  onRun,
+  initialCategory = 'backlog'
+}: TaskFormProps) {
   const addTask = useBoardStore((s) => s.addTask)
   const updateTask = useBoardStore((s) => s.updateTask)
+  const deleteTask = useBoardStore((s) => s.deleteTask)
 
   const [prompt, setPrompt] = useState('')
   const [cwd, setCwd] = useState('')
   const [dangerousMode, setDangerousMode] = useState(false)
   const [title, setTitle] = useState('')
-  const promptRef = useRef<HTMLTextAreaElement>(null)
+  const [tags, setTags] = useState<string[]>([])
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const titleRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (isOpen) {
@@ -25,13 +40,16 @@ export function TaskForm({ isOpen, onClose, editTask }: TaskFormProps) {
         setCwd(editTask.cwd)
         setDangerousMode(editTask.dangerousMode)
         setTitle(editTask.title)
+        setTags(editTask.tags ?? [])
       } else {
         setPrompt('')
         setCwd('')
         setDangerousMode(false)
         setTitle('')
+        setTags([])
       }
-      setTimeout(() => promptRef.current?.focus(), 50)
+      setConfirmDelete(false)
+      setTimeout(() => titleRef.current?.focus(), 50)
     }
   }, [isOpen, editTask])
 
@@ -52,20 +70,64 @@ export function TaskForm({ isOpen, onClose, editTask }: TaskFormProps) {
     if (folder) setCwd(folder)
   }, [])
 
+  const commitEdits = useCallback((): BoardTask | null => {
+    if (!prompt.trim() || !cwd.trim()) return null
+    if (editTask) {
+      const updated: BoardTask = {
+        ...editTask,
+        title: title.trim(),
+        prompt: prompt.trim(),
+        cwd: cwd.trim(),
+        dangerousMode,
+        tags,
+        updatedAt: Date.now()
+      }
+      updateTask(editTask.id, {
+        title: updated.title,
+        prompt: updated.prompt,
+        cwd: updated.cwd,
+        dangerousMode,
+        tags
+      })
+      return updated
+    }
+    addTask({
+      title: title.trim(),
+      prompt: prompt.trim(),
+      cwd: cwd.trim(),
+      dangerousMode,
+      tags,
+      category: initialCategory
+    })
+    return null
+  }, [title, prompt, cwd, dangerousMode, tags, editTask, addTask, updateTask, initialCategory])
+
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault()
+      const result = commitEdits()
       if (!prompt.trim() || !cwd.trim()) return
-
-      if (editTask) {
-        updateTask(editTask.id, { title: title.trim(), prompt: prompt.trim(), cwd: cwd.trim(), dangerousMode })
-      } else {
-        addTask({ title: title.trim(), prompt: prompt.trim(), cwd: cwd.trim(), dangerousMode })
-      }
+      // result is null when creating (task list refresh is enough); when editing,
+      // we don't need the return value on plain save either.
+      void result
       onClose()
     },
-    [title, prompt, cwd, dangerousMode, editTask, addTask, updateTask, onClose]
+    [commitEdits, prompt, cwd, onClose]
   )
+
+  const handleRunClick = useCallback(() => {
+    if (!editTask || !onRun) return
+    const updated = commitEdits()
+    if (!updated) return
+    onClose()
+    onRun(updated)
+  }, [editTask, onRun, commitEdits, onClose])
+
+  const handleDeleteConfirm = useCallback(() => {
+    if (!editTask) return
+    deleteTask(editTask.id)
+    onClose()
+  }, [editTask, deleteTask, onClose])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -100,7 +162,7 @@ export function TaskForm({ isOpen, onClose, editTask }: TaskFormProps) {
               <form
                 onSubmit={handleSubmit}
                 onKeyDown={handleKeyDown}
-                className="bg-surface-100 rounded-xl border border-border shadow-2xl overflow-hidden"
+                className="bg-surface-100 rounded-xl border border-border shadow-2xl"
               >
                 <div className="px-5 pt-4 pb-3">
                   <h2 className="text-sm font-semibold text-text-primary">
@@ -110,9 +172,20 @@ export function TaskForm({ isOpen, onClose, editTask }: TaskFormProps) {
 
                 <div className="px-5 space-y-3 pb-4">
                   <div>
+                    <label className="block text-xs text-text-secondary mb-1">Title</label>
+                    <input
+                      ref={titleRef}
+                      type="text"
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                      placeholder="What is this task?"
+                      className="input-field bg-surface-200 border-none"
+                    />
+                  </div>
+
+                  <div>
                     <label className="block text-xs text-text-secondary mb-1">Prompt</label>
                     <textarea
-                      ref={promptRef}
                       value={prompt}
                       onChange={(e) => setPrompt(e.target.value)}
                       placeholder="Instructions for Claude Code..."
@@ -157,21 +230,27 @@ export function TaskForm({ isOpen, onClose, editTask }: TaskFormProps) {
                   </label>
 
                   <div>
-                    <label className="block text-xs text-text-tertiary mb-1">Title (optional)</label>
-                    <input
-                      type="text"
-                      value={title}
-                      onChange={(e) => setTitle(e.target.value)}
-                      placeholder="Short label for the task"
-                      className="input-field bg-surface-200 border-none"
-                    />
+                    <label className="block text-xs text-text-tertiary mb-1">Tags</label>
+                    <TagInput value={tags} onChange={setTags} />
                   </div>
                 </div>
 
-                <div className="px-5 py-3 border-t border-border-subtle flex items-center justify-between">
-                  <span className="text-[11px] text-text-tertiary">
-                    <kbd className="px-1 py-0.5 rounded bg-surface-200 text-text-secondary">Cmd+Enter</kbd> submit
-                  </span>
+                <div className="px-5 py-3 border-t border-border-subtle flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    {editTask && (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDelete(true)}
+                        className="btn-icon btn-icon-sm text-text-tertiary hover:text-red-400"
+                        title="Delete task"
+                      >
+                        <TrashIcon className="w-4 h-4" />
+                      </button>
+                    )}
+                    <span className="text-[11px] text-text-tertiary">
+                      <kbd className="px-1 py-0.5 rounded bg-surface-200 text-text-secondary">Cmd+Enter</kbd> submit
+                    </span>
+                  </div>
                   <div className="flex gap-2">
                     <button
                       type="button"
@@ -180,6 +259,17 @@ export function TaskForm({ isOpen, onClose, editTask }: TaskFormProps) {
                     >
                       Cancel
                     </button>
+                    {editTask && onRun && (
+                      <button
+                        type="button"
+                        onClick={handleRunClick}
+                        disabled={!prompt.trim() || !cwd.trim()}
+                        className="btn-primary bg-green-500/90 hover:bg-green-500 text-white"
+                        title="Save changes and launch a session"
+                      >
+                        Run
+                      </button>
+                    )}
                     <button
                       type="submit"
                       disabled={!prompt.trim() || !cwd.trim()}
@@ -191,6 +281,20 @@ export function TaskForm({ isOpen, onClose, editTask }: TaskFormProps) {
                 </div>
               </form>
             </motion.div>
+            <ConfirmDialog
+              isOpen={confirmDelete}
+              title="Delete task?"
+              message={
+                editTask
+                  ? `"${editTask.title || editTask.prompt.slice(0, 60)}" will be removed from the queue.`
+                  : ''
+              }
+              onCancel={() => setConfirmDelete(false)}
+              onConfirm={() => {
+                setConfirmDelete(false)
+                handleDeleteConfirm()
+              }}
+            />
           </>
         )}
       </AnimatePresence>
